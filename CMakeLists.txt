@@ -20,14 +20,24 @@ ExternalProject_Add(2048_CPP
         BUILD_BYPRODUCTS ${CMAKE_BINARY_DIR}/2048_CPP-prefix/src/2048_CPP-build/lib2048_CPP.dylib
 )
 
+ExternalProject_Add(libtorch
+        SOURCE_DIR ../pytorch
+        CMAKE_ARGS -DBUILD_SHARED_LIBS:BOOL=ON -DCMAKE_BUILD_TYPE:STRING=Release -DCMAKE_INSTALL_PREFIX:PATH=../pytorch-install
+        INSTALL_COMMAND ""
+        BUILD_BYPRODUCTS ${CMAKE_BINARY_DIR}/libtorch-prefix/src/libtorch-build/lib/libtorch_cpu.dylib ${CMAKE_BINARY_DIR}/libtorch-prefix/src/libtorch-build/lib/libc10.dylib
+)
+
 if (APPLE)
     include_directories(Libraries/include/libtorch)
     include_directories(Libraries/include/libtorch/torch/csrc/api/include)
 
-    set(TORCH ${CUR_DIR}/Libraries/lib/MacOS/libtorch/libtorch_cpu.dylib)
-    set(C10 ${CUR_DIR}/Libraries/lib/MacOS/libtorch/libc10.dylib)
+#    set(TORCH ${CUR_DIR}/Libraries/lib/MacOS/libtorch/libtorch_cpu.dylib)
+    set(TORCH ${CMAKE_BINARY_DIR}/libtorch-prefix/src/libtorch-build/lib/libtorch_cpu.dylib)
+#    set(C10 ${CUR_DIR}/Libraries/lib/MacOS/libtorch/libc10.dylib)
+    set(C10 ${CMAKE_BINARY_DIR}/libtorch-prefix/src/libtorch-build/lib/libc10.dylib)
 endif ()
 
+ExternalProject_Get_Property(libtorch BINARY_DIR)
 ExternalProject_Get_Property(2048_CPP BINARY_DIR)
 
 add_custom_command(

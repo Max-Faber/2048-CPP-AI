@@ -2,3 +2,6 @@
 [submodule "2048-CPP"]
 	path = 2048-CPP
 	url = https://github.com/Max-Faber/2048-CPP
+[submodule "pytorch"]
+	path = pytorch
+	url = https://github.com/pytorch/pytorch

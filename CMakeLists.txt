@@ -22,30 +22,28 @@ ExternalProject_Add(2048_CPP
 
 ExternalProject_Add(libtorch
         SOURCE_DIR ../pytorch
-        CMAKE_ARGS -DBUILD_SHARED_LIBS:BOOL=ON -DCMAKE_BUILD_TYPE:STRING=Release -DUSE_CUDA=0 -DCMAKE_INSTALL_PREFIX:PATH=../pytorch-install
-        INSTALL_COMMAND ""
+        CMAKE_ARGS -DBUILD_SHARED_LIBS:BOOL=ON -DCMAKE_BUILD_TYPE:STRING=Release -DUSE_CUDA=0 -DCMAKE_INSTALL_PREFIX:PATH=${CMAKE_BINARY_DIR}/pytorch-install ${CMAKE_BINARY_DIR}/libtorch-prefix
+        BUILD_COMMAND cmake --build . --target install
         BUILD_BYPRODUCTS ${CMAKE_BINARY_DIR}/libtorch-prefix/src/libtorch-build/lib/libtorch_cpu.dylib ${CMAKE_BINARY_DIR}/libtorch-prefix/src/libtorch-build/lib/libc10.dylib
 )
 
-if (APPLE)
-    include_directories(Libraries/include/libtorch)
-    include_directories(Libraries/include/libtorch/torch/csrc/api/include)
 
-#    set(TORCH ${CUR_DIR}/Libraries/lib/MacOS/libtorch/libtorch_cpu.dylib)
-    set(TORCH ${CMAKE_BINARY_DIR}/libtorch-prefix/src/libtorch-build/lib/libtorch_cpu.dylib)
-#    set(C10 ${CUR_DIR}/Libraries/lib/MacOS/libtorch/libc10.dylib)
-    set(C10 ${CMAKE_BINARY_DIR}/libtorch-prefix/src/libtorch-build/lib/libc10.dylib)
+if (APPLE)
+    include_directories(${CMAKE_BINARY_DIR}/pytorch-install/include)
+    include_directories(${CMAKE_BINARY_DIR}/pytorch-install/include/torch/csrc/api/include)
+
+    set(TORCH ${CMAKE_BINARY_DIR}/pytorch-install/lib/libtorch_cpu.dylib)
+    set(C10 ${CMAKE_BINARY_DIR}/pytorch-install/lib/libc10.dylib)
 endif ()
 
-ExternalProject_Get_Property(libtorch BINARY_DIR)
 ExternalProject_Get_Property(2048_CPP BINARY_DIR)
 
-add_custom_command(
-        TARGET ${PROJECT_NAME} PRE_LINK
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${BINARY_DIR}/lib2048_CPP.dylib
-        ${CMAKE_CURRENT_BINARY_DIR}/lib2048_CPP.dylib
-)
+#add_custom_command(
+#        TARGET ${PROJECT_NAME} PRE_LINK
+#        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+#        ${BINARY_DIR}/lib2048_CPP.dylib
+#        ${CMAKE_CURRENT_BINARY_DIR}/lib2048_CPP.dylib
+#)
 
 add_custom_command(
         TARGET ${PROJECT_NAME} POST_BUILD
@@ -75,7 +73,8 @@ add_custom_command(
 #)
 
 target_link_libraries(2048_CPP_AI
-        ${BINARY_DIR}/lib2048_CPP.dylib
+        #        ${BINARY_DIR}/lib2048_CPP.dylib
+        ${CMAKE_BINARY_DIR}/2048_CPP-prefix/src/2048_CPP-build/lib2048_CPP.dylib
         ${TORCH}
         ${C10}
 )

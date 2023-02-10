@@ -22,7 +22,7 @@ ExternalProject_Add(2048_CPP
 
 ExternalProject_Add(libtorch
         SOURCE_DIR ../pytorch
-        CMAKE_ARGS -DBUILD_SHARED_LIBS:BOOL=ON -DCMAKE_BUILD_TYPE:STRING=Release -DCMAKE_INSTALL_PREFIX:PATH=../pytorch-install
+        CMAKE_ARGS -DBUILD_SHARED_LIBS:BOOL=ON -DCMAKE_BUILD_TYPE:STRING=Release -DUSE_CUDA=0 -DCMAKE_INSTALL_PREFIX:PATH=../pytorch-install
         INSTALL_COMMAND ""
         BUILD_BYPRODUCTS ${CMAKE_BINARY_DIR}/libtorch-prefix/src/libtorch-build/lib/libtorch_cpu.dylib ${CMAKE_BINARY_DIR}/libtorch-prefix/src/libtorch-build/lib/libc10.dylib
 )

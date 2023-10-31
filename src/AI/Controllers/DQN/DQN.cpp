@@ -1,27 +1,35 @@
 #include <DQN.h>
 
-DQN::DQN(int numberInputs, int numberOutputs, float learningRate)
-{
-    qNetwork = new Model(numberInputs, numberOutputs, learningRate);
-    targetNetwork = new Model(numberInputs, numberOutputs, learningRate);
-    optimizer = new torch::optim::Adam(qNetwork->getParameters(), LEARNING_RATE);
-    randomActionDistributionInt = std::uniform_int_distribution<>(0, numberOutputs - 1);
-    alignModels();
-    initializeRandom();
-}
+Model *DQN::qNetwork, *DQN::targetNetwork;
+torch::optim::Adam *DQN::optimizer;
+EpsilonAdaptiveGreedy *DQN::epsilonAdaptiveGreedy;
+std::mt19937 *DQN::gen; // Standard mersenne_twister_engine seeded with random_device
+std::uniform_int_distribution<int> DQN::randomActionDistributionInt;
+ExperienceReplay DQN::experienceReplay;
+std::uniform_real_distribution<> DQN::randomActionDistributionReal = std::uniform_real_distribution<>(0, 1);
 
-void DQN::train()
+void DQN::train(int numberInputs, int numberOutputs)
 {
     int maxScore = 0, maxTile = 0, timestepsSinceAlignment = 0;
     bool adaptiveEpsilon = true;
     std::vector<int> endScores, endMaxTiles;
 
+    Device::checkDevice();
+    qNetwork = new Model(numberInputs, numberOutputs);
+    targetNetwork = new Model(numberInputs, numberOutputs);
+    optimizer = new torch::optim::Adam(qNetwork->getParameters(), LEARNING_RATE);
+    randomActionDistributionInt = std::uniform_int_distribution<>(0, numberOutputs - 1);
+    alignModels();
+    initializeRandom();
+
     epsilonAdaptiveGreedy = new EpsilonAdaptiveGreedy(adaptiveEpsilon);
     for (int episode = 1; episode <= N_EPISODES; episode++)
     {
-        printf("Episode %d/%d\n", episode, N_EPISODES);
-        GameState::reset();
-        torch::Tensor state = getState();
+//        printf("Episode %d/%d\n", episode, N_EPISODES);
+        GameState::gameState->reset();
+        torch::Tensor stateOneHot = getState();
+        int moves = 0;
+        const clock_t beginTime = clock();
 
         while (true)
         {
@@ -30,46 +38,51 @@ void DQN::train()
             bool isTerminal, tilesMoved;
             torch::Tensor newState;
             std::pair<bool, int> moveResult;
-            Move action = getAction(state, epsilonAdaptiveGreedy->getEpsilon());
+            std::vector<Move> actions = getAction(stateOneHot, epsilonAdaptiveGreedy->getEpsilon());
 
-            moveResult = GameState::makeMove(action);
-            tilesMoved = moveResult.first;
-            mergeSum = moveResult.second;
-            if (tilesMoved)
+            for (Move action : actions)
             {
-                GameState::spawnTileRandom();
+                moveResult = GameState::gameState->makeMove(action, true);
+                tilesMoved = moveResult.first;
+                mergeSum = moveResult.second;
+                if (!tilesMoved) continue;
+                Keyboard::tilesMoved = tilesMoved;
+                moves++;
                 GameRendering::display();
-            }
-            newState = getState();
-            isTerminal = GameState::isTerminal();
-            reward = calculateReward(state, tilesMoved, isTerminal, mergeSum, action);
-            epsilonAdaptiveGreedy->update();
-            experienceReplay.addExperience(state, action, reward, newState, isTerminal);
-            updateModel();
-            state = newState;
-            maxScore = std::max(maxScore, GameState::score);
-            maxTile = std::max(maxTile, state.max().item<int>());
-            if ((timestepsSinceAlignment++) == 500)
-            {
-                alignModels();
-                timestepsSinceAlignment = 0;
-            }
+                Keyboard::redrawRequired = true;
+                newState = getState();
+                isTerminal = GameState::gameState->isTerminal();
+                reward = calculateReward(isTerminal, mergeSum);
+                epsilonAdaptiveGreedy->update();
+                experienceReplay.addExperience(stateOneHot, action, reward, newState, isTerminal);
+                updateModel();
+                stateOneHot = newState;
+                maxScore = std::max(maxScore, GameState::gameState->score);
+                std::vector<int> state = GameState::gameState->getStateFlattened();
+                maxTile = std::max(maxTile, *std::max_element(state.begin(), state.end()));
+                if ((timestepsSinceAlignment++) == MODEL_ALIGN_FREQUENCY)
+                {
+                    alignModels();
+                    timestepsSinceAlignment = 0;
+                }
 
-            std::string moveString;
-            if (action == Move::up) moveString = "up";
-            else if (action == Move::right) moveString = "right";
-            else if (action == Move::down) moveString = "down";
-            else moveString = "left";
-            printf("Episode: %d, score: %d, maxScore: %d, maxTile: %d, move: %s, reward: %f\n", episode, GameState::score, maxScore, maxTile, moveString.c_str(), reward);
-            if (isTerminal)
-            {
-                endScores.push_back(GameState::score);
-                endMaxTiles.push_back(maxTile);
+                std::string moveString;
+                if (action == Move::up) moveString = "up";
+                else if (action == Move::right) moveString = "right";
+                else if (action == Move::down) moveString = "down";
+                else moveString = "left";
+                // printf("Episode: %d, score: %d, maxScore: %d, maxTile: %d, move: %s, reward: %f\n", episode, GameState::score, maxScore, maxTile, moveString.c_str(), reward);
                 break;
             }
-            // usleep(500000);
+            if (isTerminal)
+            {
+                endScores.push_back(GameState::gameState->score);
+                endMaxTiles.push_back(stateOneHot.max().item<int>());
+                break;
+            }
         }
-        // printf("Episode: %d, score: %d, maxScore: %d, maxTile: %d\n", episode, GameState::score, maxScore, maxTile);
+        float episodeTime = (float)(clock() - beginTime) / CLOCKS_PER_SEC;
+        printf("Episode: %d, score: %d, maxScore: %d, maxTile: %d, moves/sec: %d\n", episode, GameState::gameState->score, maxScore, maxTile, (int)(moves / episodeTime));
     }
 }
 
@@ -85,14 +98,14 @@ void DQN::updateModel()
     std::sample(experiences.begin(), experiences.end(), std::back_inserter(miniBatch), BATCH_SIZE, *gen);
     for (int i = 0; i < BATCH_SIZE; i++)
     {
-        states.push_back(qNetwork->normalizeMinMax(miniBatch[i]->state));
-        newStates.push_back(qNetwork->normalizeMinMax(miniBatch[i]->newState));
+        states.push_back(miniBatch[i]->state);
+        newStates.push_back(miniBatch[i]->newState);
     }
     qPredictions = qNetwork->forward(torch::stack(states)).to(torch::kCPU);
     targetPredictions = targetNetwork->forward(torch::stack(newStates));
     for (int i = 0; i < BATCH_SIZE; i++)
     {
-        float target = 0;
+        float target;
         float reward = miniBatch[i]->reward;
 
         if (miniBatch[i]->isTerminal) target = reward;
@@ -106,76 +119,61 @@ void DQN::updateModel()
     optimizer->step();
 }
 
-float DQN::calculateReward(const torch::Tensor& state, bool tilesMoved, bool isTerminal, int mergeSum, Move action)
+float DQN::calculateReward(bool isTerminal, int mergeSum)
 {
     float reward = 0.f;
-//    int maxTileValue = state.max().item<int>();
-//    int topLeft = GameState::fieldTileRows[0][0]->tile ? GameState::fieldTileRows[0][0]->tile->val : -1;
-//    int topRight = GameState::fieldTileRows[0][GameState::gridDimension - 1]->tile ? GameState::fieldTileRows[0][GameState::gridDimension - 1]->tile->val : -1;
-//    int bottomLeft = GameState::fieldTileRows[GameState::gridDimension - 1][0]->tile ? GameState::fieldTileRows[GameState::gridDimension - 1][0]->tile->val : -1;
-//    int bottomRight = GameState::fieldTileRows[GameState::gridDimension - 1][GameState::gridDimension - 1]->tile ? GameState::fieldTileRows[GameState::gridDimension - 1][GameState::gridDimension - 1]->tile->val : -1;
-//    int maxCornerValue = std::max(
-//            std::max(topLeft, topRight),
-//            std::max(bottomLeft, bottomRight)
-//    );
-//
-//    if (!tilesMoved) reward -= 25.f;
-//    if (isTerminal) reward -= 50.f;
-//    if (maxCornerValue == 1) return reward;
-//    reward += (float)maxCornerValue / (float)maxTileValue;
-//    mergeSum = mergeSum > maxTileValue ? maxTileValue : mergeSum;
-//    reward += (float)mergeSum / (float)maxTileValue;
-//    return reward;
 
+//    GameState::printGrid();
+    int cornerValue = std::max(
+            std::max(
+                    GameState::gameState->getTileValue(GameState::gridDimension - 1, 0),
+                    GameState::gameState->getTileValue(0, GameState::gridDimension - 1)
+            ),
+            std::max(
+                    GameState::gameState->getTileValue(GameState::gridDimension - 1, GameState::gridDimension - 1),
+                    GameState::gameState->getTileValue(0, 0)
+            )
+    );
+//     cornerValue = GameState::getTileValue(0, 0);
+//    if (cornerValue > 0) reward += (float)log2(cornerValue);
     for (int row = 0; row < GameState::gridDimension; row++)
     {
-        bool interruptionFound = false;
-        int selectedTileValue = GameState::getTileValue(row, 0);
-
-        if (selectedTileValue == 1) continue;
-        for (int column = 1; column < GameState::gridDimension - 1; column++)
+        for (int column = 0; column < GameState::gridDimension - 1; column++)
         {
-            int currentTileValue = GameState::getTileValue(row, column);
+            int a = GameState::gameState->getTileValue(row, column);
+            int b = GameState::gameState->getTileValue(row, column + 1);
 
-            if (currentTileValue == 1) continue;
-            if (currentTileValue > selectedTileValue)
-            {
-                interruptionFound = true;
-                break;
-            }
-            reward += 1.f;
-            // if (currentTileValue <= GameState::getTileValue(row, column + 1))
-            // reward += 1.f;
+            if (a == 0 || b == 0) continue;
+//            if (a > b) reward += .1f;
+            if (a == b) reward += 2.f;
         }
-        if (interruptionFound) break;
-        // if (row == GameState::gridDimension - 1) reward += 5.f;
     }
+    std::vector<int> stateFlattened = GameState::gameState->getStateFlattened();
+    int maxValue = *std::max_element(stateFlattened.begin(), stateFlattened.end());
+    if (cornerValue == maxValue) reward += 100.f;
     for (int column = 0; column < GameState::gridDimension; column++)
     {
-        bool interruptionFound = false;
-        int selectedTileValue = GameState::getTileValue(0, column);
-
-        if (selectedTileValue == 1) continue;
-        for (int row = 1; row < GameState::gridDimension - 1; row++)
+        for (int row = 0; row < GameState::gridDimension - 1; row++)
         {
-            int currentTileValue = GameState::getTileValue(row, column);
+            int a = GameState::gameState->getTileValue(row, column);
+            int b = GameState::gameState->getTileValue(row + 1, column);
 
-            if (currentTileValue == 1) continue;
-            if (currentTileValue > selectedTileValue)
+            if (a == 0 || b == 0) continue;
+            if (column % 2 == 1)
             {
-                interruptionFound = true;
-                break;
+                int temp = a;
+
+                a = b;
+                b = temp;
             }
-            reward += 1.f;
-            // if (currentTileValue <= GameState::getTileValue(row + 1, column))
-            //     reward += 1.f;
+//            float factor = (float)(column + 1) / GameState::gridDimension;
+            if (a >= b) reward += 1.f;// * factor;
+            else reward -= 5.f;// * factor;
         }
-        if (interruptionFound) break;
-        // if (column == GameState::gridDimension - 1) reward += 5.f;
     }
-    if (!tilesMoved) reward *= 0.8f;
-    if (isTerminal) reward = -50.f;
-    reward += mergeSum > 0 ? 5.f : 0.f;
+    reward += (float)GameState::gameState->emptyFieldPositions.size();
+    reward += (float)log2(mergeSum);
+    if (isTerminal) reward = abs(reward) * -10;
     return reward;
 }
 
@@ -186,24 +184,63 @@ void DQN::initializeRandom()
     gen = new std::mt19937(rd());
 }
 
+//torch::Tensor DQN::getState()
+//{
+//    std::vector<int> stateFlattened = GameState::getStateFlattened();
+//    std::vector<int> stateFlattenedOneHot;
+//
+//    for (int i = 0; i < stateFlattened.size(); i++)
+//    {
+//        std::vector<int> tileOneHot = std::vector<int>(stateFlattened.size());
+//        int val = stateFlattened[i];
+//
+//        if (val > 0) tileOneHot[(int)log2(val) - 1] = 1;
+//        stateFlattenedOneHot.insert(std::end(stateFlattenedOneHot), tileOneHot.begin(), tileOneHot.end());
+//    }
+//    return torch::tensor(stateFlattenedOneHot, Device::getTensorDeviceOptions().dtype(torch::kFloat));
+////    return torch::tensor(GameState::getStateFlattened(), Device::getTensorDeviceOptions().dtype(torch::kFloat));
+//}
+
 torch::Tensor DQN::getState()
 {
-    std::vector<int> stateFlattened = GameState::getStateFlattened();
+    std::vector<int> stateFlattened = GameState::gameState->getStateFlattened();
+    torch::Tensor stateOneHot = torch::zeros({GameState::gridDimension, GameState::gridDimension, (int)pow(GameState::gridDimension, 2)}, Device::getTensorDeviceOptions().dtype(torch::kFloat));
 
-    return torch::tensor(GameState::getStateFlattened(), Device::getTensorDeviceOptions().dtype(torch::kFloat));
+    for (int row = 0; row < GameState::gridDimension; row++)
+    {
+        for (int column = 0; column < GameState::gridDimension; column++)
+        {
+            int val = GameState::gameState->getTileValue(row, column);
+
+            if (val == 0) continue;
+            stateOneHot[row][column][(int)log2(val) - 1] = 1.f;
+        }
+    }
+    return stateOneHot;
 }
 
-Move DQN::getAction(const torch::Tensor& state, float epsilon)
+std::vector<Move> DQN::getAction(const torch::Tensor& state, float epsilon)
 {
     if (randomActionDistributionReal(*gen) < epsilon)
     {
         int action = randomActionDistributionInt(*gen);
 
-        return static_cast<Move>(action);
+        return std::vector<Move> { static_cast<Move>(action) };
     }
     torch::Tensor qValues = qNetwork->forward(state);
-    torch::Tensor qValueIndex = torch::argmax(qValues);
-    return static_cast<Move>(qValueIndex.item<int>());
+//    torch::Tensor qValueIndex = torch::argmax(qValues);
+    torch::Tensor qValuesSorted = torch::argsort(qValues, -1, true);
+    if (qValuesSorted.is_contiguous())
+    {
+        qValuesSorted = qValuesSorted.contiguous();
+    }
+    std::vector<Move> moves(qValuesSorted.numel());
+    for (int i = 0; i < qValuesSorted.numel(); i++)
+    {
+        moves[i] = (Move)qValuesSorted[0][i].item<int>();
+    }
+    // return static_cast<std::vector<Move>>(qValueIndex.item<int>());
+    return moves;
 }
 
 void DQN::alignModels()

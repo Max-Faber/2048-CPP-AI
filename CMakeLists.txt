@@ -7,6 +7,7 @@ include_directories(src/include)
 include_directories(src/include/AI)
 include_directories(src/include/AI/Controllers)
 include_directories(src/include/AI/Controllers/DQN)
+include_directories(src/include/AI/Controllers/Expectimax)
 include_directories(2048-CPP/src/include)
 include_directories(2048-CPP/Libraries/include)
 include_directories(2048-CPP/Libraries/include/FreeType)
@@ -16,12 +17,12 @@ string(CONCAT CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-rpath -Wl,.
 
 add_executable(2048_CPP_AI
         src/2048-AI.cpp
-        src/AI/Device.cpp
+        src/AI/Controllers/DQN/Device.cpp
         src/AI/Controllers/DQN/DQN.cpp
         src/AI/Controllers/DQN/ExperienceReplay.cpp
         src/AI/Controllers/DQN/EpsilonAdaptiveGreedy.cpp
         src/AI/Controllers/DQN/Model.cpp
-)
+        src/AI/Controllers/Expectimax/Expectimax.cpp)
 ExternalProject_Add(2048_CPP
         SOURCE_DIR ../2048-CPP
         CMAKE_ARGS -DLIB_SHARED=1
@@ -88,4 +89,3 @@ target_link_libraries(2048_CPP_AI
         ${TORCH}
         ${C10}
 )
-

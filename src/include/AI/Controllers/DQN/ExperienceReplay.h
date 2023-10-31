@@ -1,7 +1,7 @@
 #include <torch/torch.h>
 #include <GameState.h>
 
-#define EXPERIENCE_REPLAY_LENGTH 100000
+#define EXPERIENCE_REPLAY_LENGTH 50000
 
 struct Experience
 {

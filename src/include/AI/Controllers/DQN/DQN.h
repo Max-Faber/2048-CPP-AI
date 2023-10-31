@@ -7,30 +7,27 @@
 #include <vector>
 
 #define N_EPISODES 5000
-#define LEARNING_RATE 1e-3
+#define LEARNING_RATE 1e-7
 #define MODEL_ALIGN_FREQUENCY 500
 #define GAMMA .9f
 
 class DQN
 {
 private:
-    Model* qNetwork;
-    Model* targetNetwork;
-    torch::optim::Adam* optimizer;
-    EpsilonAdaptiveGreedy* epsilonAdaptiveGreedy;
-    std::mt19937* gen; // Standard mersenne_twister_engine seeded with random_device
-    std::uniform_int_distribution<int> randomActionDistributionInt;
-    ExperienceReplay experienceReplay;
-    std::uniform_real_distribution<> randomActionDistributionReal = std::uniform_real_distribution<>(0, 1);
+    static Model *qNetwork, *targetNetwork;
+    static torch::optim::Adam *optimizer;
+    static EpsilonAdaptiveGreedy *epsilonAdaptiveGreedy;
+    static std::mt19937 *gen; // Standard mersenne_twister_engine seeded with random_device
+    static std::uniform_int_distribution<int> randomActionDistributionInt;
+    static ExperienceReplay experienceReplay;
+    static std::uniform_real_distribution<> randomActionDistributionReal;
 
-    void updateModel();
-    float calculateReward(const torch::Tensor& state, bool tilesMoved, bool isTerminal, int mergeSum, Move action);
-    void initializeRandom();
+    static void updateModel();
+    static float calculateReward(bool isTerminal, int mergeSum);
+    static void initializeRandom();
     static torch::Tensor getState();
-    Move getAction(const torch::Tensor& state, float epsilon);
-    void alignModels();
+    static std::vector<Move> getAction(const torch::Tensor& state, float epsilon);
+    static void alignModels();
 public:
-    DQN(int numberInputs, int numberOutputs, float learningRate);
-
-    void train();
+    static void train(int numberInputs, int numberOutputs);
 };
